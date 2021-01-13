@@ -1,5 +1,9 @@
 import json
+from collections import Set, defaultdict
 from pathlib import Path
+from typing import Dict, List
+
+import requests
 
 from .core import BaseValidator, OpenApiValidationError
 
@@ -151,3 +155,48 @@ class IhanStandardsValidator(BaseValidator):
     def validate(self):
         super().validate()
         check_extra_files_exist(self.path)
+
+
+def find_urls_in_jsonld(path: Path) -> Set:
+    json_ld = json.loads(path.read_text())
+    urls = []
+
+    def looks_like_url(s: str):
+        return s.startswith(("http://", "https://"))
+
+    def process_dict(d: dict):
+        for k, v in d.items():
+            if isinstance(v, str) and looks_like_url(v):
+                urls.append(v)
+            elif isinstance(v, dict):
+                process_dict(v)
+
+    process_dict(json_ld)
+    return set(urls)
+
+
+class JsonLdUrlValidator(BaseValidator):
+    def validate_spec(self, spec: dict):
+        pass
+
+    def collect_artifacts(self):
+        json_ld_path = self.path.with_suffix(".jsonld")
+        return {json_ld_path: find_urls_in_jsonld(json_ld_path)}
+
+    @classmethod
+    def run_post_validation(cls, artifacts: List[Dict[Path, Set]]):
+        urls_to_jsonld = defaultdict(list)
+        for artifact in artifacts:
+            for json_ld_path, urls in artifact.items():
+                for url in urls:
+                    urls_to_jsonld[url].append(json_ld_path)
+
+        error_message = ""
+        for url, json_ld_path in urls_to_jsonld.items():
+            try:
+                requests.get(url).raise_for_status()
+            except Exception:
+                jsonld_files = ", ".join([str(p) for p in json_ld_path])
+                error_message += f"Failed to fetch {url} (found in {jsonld_files})\n"
+
+        return error_message or None

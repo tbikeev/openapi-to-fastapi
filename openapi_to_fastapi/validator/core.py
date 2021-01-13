@@ -1,7 +1,7 @@
 import abc
 import json
 from pathlib import Path
-from typing import Union
+from typing import Any, Optional, Union
 
 
 class OpenApiValidationError(Exception):
@@ -34,6 +34,22 @@ class BaseValidator:
     @abc.abstractmethod
     def validate_spec(self, spec: dict):
         raise NotImplementedError
+
+    def collect_artifacts(self):
+        """
+        Runs by CLI tool after validation is completed
+        :return: Object need in post validation step
+        """
+        pass
+
+    @classmethod
+    def run_post_validation(cls, artifacts) -> Optional[Any]:
+        """
+        Runs by CLI tool after entire test session is completed
+        :param artifacts: List of elements returned by `collect_artifacts` method
+        :return: Error message to be logged if post validation fails
+        """
+        return None
 
 
 class DefaultValidator(BaseValidator):

@@ -5,7 +5,7 @@ import traceback
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 import click
 import coloredlogs
@@ -51,6 +51,7 @@ def validate_specs(path: Path, modules: List[str], extra_validators: List[str]) 
         logger.info(f"OpenAPI specs root path: {path}")
         logger.info("Validators: %s", ", ".join([v.__name__ for v in validators]))
 
+    artifacts: Dict[BaseValidator, List] = {v: [] for v in validators}
     passed, failed = 0, 0
     for spec_path in path.glob("**/*.json"):
         logger.info(f"File: {spec_path}")
@@ -63,15 +64,30 @@ def validate_specs(path: Path, modules: List[str], extra_validators: List[str]) 
         else:
             logger.info("[PASSED]")
             passed += 1
+            for v in validators:
+                artifacts[v].append(v(spec_path).collect_artifacts())
         print_dashes("-")
 
+    post_validation_passed = True
+    if passed:
+        logger.info("Running post validation...")
+        for v in validators:
+            err = v.run_post_validation(artifacts[v])
+            if err:
+                post_validation_passed = False
+                logger.error(err)
+        logger.info("Done")
+
+    session_failed = failed or not post_validation_passed
     with header():
-        log = logger.error if failed else logger.info
+        log = logger.error if session_failed else logger.info
         log("Summary:")
         log(f"Total : {passed+failed}")
         log(f"Passed: {passed}")
         log(f"Failed: {failed}")
-    return 1 if failed else 0
+        if not post_validation_passed:
+            log("Post validation failed")
+    return 1 if session_failed else 0
 
 
 def _load_extra_validator_modules(modules: List[str]) -> list:
